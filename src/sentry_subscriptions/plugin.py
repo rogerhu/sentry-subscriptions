@@ -122,7 +122,7 @@ class SubscriptionsPlugin(Plugin):
             'link': link,
             'interfaces': interface_list,
         })
-        html_body = UnicodeSafePynliner().from_string(render_to_string('sentry/emails/error.html', {
+        html_body = UnicodeSafePynliner().from_string(render_to_string('sentry_subscriptions/emails/error_subscription.html', {
             'group': group,
             'event': event,
             'link': link,
@@ -169,7 +169,7 @@ class SubscriptionsPlugin(Plugin):
         for pattern, emails in subscriptions.iteritems():
             if fnmatch.fnmatch(event.culprit, pattern):
                     notifications += emails
-        
+
         return notifications
 
     def post_process(self, group, event, is_new, is_sample, **kwargs):

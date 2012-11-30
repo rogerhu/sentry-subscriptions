@@ -15,8 +15,8 @@ setup(
     zip_safe=False,
     install_requires=install_requires,
     entry_points={
-        'sentry.plugins': [
-            'subscriptions = sentry_subscriptions.plugin:SubscriptionsPlugin'
+        'sentry.apps': [
+            'subscriptions = sentry_subscriptions'
         ]
     }
 )
