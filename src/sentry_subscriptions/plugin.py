@@ -1,14 +1,9 @@
 from django import forms
-from django.core.mail import EmailMultiAlternatives
-from django.core.urlresolvers import reverse
 from django.core.validators import email_re
 from django.core.validators import ValidationError
-from django.template.loader import render_to_string
 from django.utils.translation import ugettext_lazy as _
-from django.conf import settings
-from sentry.plugins import Plugin
-from sentry.utils.email import UnicodeSafePynliner
-from sentry.utils.http import absolute_uri
+from sentry.plugins.sentry_mail.models import MailPlugin
+from sentry.utils.email import MessageBuilder
 
 import fnmatch
 import sentry_subscriptions
@@ -73,7 +68,7 @@ class SubscriptionOptionsForm(forms.Form):
         return email_values
 
 
-class SubscriptionsPlugin(Plugin):
+class SubscriptionsPlugin(MailPlugin):
 
     author = 'John Lynn'
     author_url = 'https://github.com/jlynn/sentry-subscriptions'
@@ -86,70 +81,10 @@ class SubscriptionsPlugin(Plugin):
     conf_key = 'subscriptions'
     project_conf_form = SubscriptionOptionsForm
 
+    subject_prefix = "[Sentry Subscription] "
+
     def is_configured(self, project, **kwargs):
         return bool(self.get_option('subscriptions', project))
-
-    def _send_mail(self, send_to, subject, body, html_body=None, project=None, fail_silently=False, headers=None):
-
-        msg = EmailMultiAlternatives(
-            '[Sentry Subscription] %s' % subject,
-            body,
-            settings.SERVER_EMAIL,
-            send_to,
-            headers=headers)
-        if html_body:
-            msg.attach_alternative(html_body, "text/html")
-        msg.send(fail_silently=fail_silently)
-
-    def get_notification_settings_url(self):
-        return absolute_uri(reverse('sentry-account-settings-notifications'))
-
-    def send_notification(self, emails, group, event, fail_silently=False):
-        '''Shamelessly adapted from sentry.plugins.sentry_mail.models.MailProcessor'''
-
-        project = group.project
-
-        interface_list = []
-        for interface in event.interfaces.itervalues():
-            body = interface.to_string(event)
-            if not body:
-                continue
-            interface_list.append((interface.get_title(), body))
-
-        subject = '[%s] %s %s: %s' % (project.name.encode('utf-8'), event.get_level_display().upper().encode('utf-8'),
-            event.culprit.encode('utf-8'), event.error().encode('utf-8').splitlines()[0])
-
-        link = group.get_absolute_url()
-
-        template = 'sentry/emails/error.txt'
-        html_template = 'sentry/emails/error.html'
-
-        context = {
-            'group': group,
-            'event': event,
-            'tags': event.get_tags(),
-            'link': link,
-            'interfaces': interface_list,
-        }
-
-        headers = {
-            'X-Sentry-Logger': event.logger,
-            'X-Sentry-Logger-Level': event.get_level_display(),
-            'X-Sentry-Project': project.name,
-            'X-Sentry-Server': event.server_name,
-        }
-
-        self._send_mail(
-            send_to=emails,
-            subject=subject,
-            body=body,
-            template=template,
-            html_template=html_template,
-            project=project,
-            fail_silently=fail_silently,
-            headers=headers,
-            context=context
-        )
 
     def should_notify(self, event, is_new):
 
@@ -178,6 +113,24 @@ class SubscriptionsPlugin(Plugin):
 
         return notifications
 
+    def _send_mail(self, subject, template=None, html_template=None, body=None,
+                   project=None, headers=None, context=None, fail_silently=False):
+
+        subject_prefix = self.get_option('subject_prefix', project) or self.subject_prefix
+
+        msg = MessageBuilder(
+            subject='%s%s' % (subject_prefix, subject),
+            template=template,
+            html_template=html_template,
+            body=body,
+            headers=headers,
+            context=context,
+        )
+
+        send_to = self._send_to
+
+        return msg.send(to=send_to, fail_silently=fail_silently)
+
     def post_process(self, group, event, is_new, is_sample, **kwargs):
 
         if not event.culprit:
@@ -187,5 +140,8 @@ class SubscriptionsPlugin(Plugin):
             return
 
         if self.should_notify(event, is_new):
-            emails_to_notify = self.get_matches(event)
-            self.send_notification(emails_to_notify, group, event)
+            try:
+                self._send_to = self.get_matches(event)
+                self.notify_users(group, event)
+            finally:
+                self._send_to = []
