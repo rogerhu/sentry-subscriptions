@@ -1,0 +1,10 @@
+{
+    "name": "sentry-subscriptions"
+    "provision": [],
+    "tasks": [
+        {"name": "Dummy Tests", "command": "exit 0"}
+    ],
+    "subprojects": [
+    ]
+}
+
